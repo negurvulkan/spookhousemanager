@@ -463,11 +463,11 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
                 w.end_x,
                 w.end_y,
                 w.status,
-                sa.sprite_path AS side_a_sprite,
+                sa.sprite_path AS side_a_sprite_path,
                 sa.material AS side_a_material,
                 sa.is_outside AS side_a_is_outside,
                 sa.tint AS side_a_tint,
-                sb.sprite_path AS side_b_sprite,
+                sb.sprite_path AS side_b_sprite_path,
                 sb.material AS side_b_material,
                 sb.is_outside AS side_b_is_outside,
                 sb.tint AS side_b_tint
@@ -484,8 +484,38 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
         return [];
     }
 
-    $normalizeSide = static function (array $wall, string $prefix): ?array {
-        $sprite = $wall[$prefix . '_sprite'] ?? null;
+    $normalizeSpritePath = static function (?string $spritePath): ?string {
+        if ($spritePath === null || $spritePath === '') {
+            return null;
+        }
+
+        $trimmed = ltrim($spritePath);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        // Ensure sprite paths always point to the public assets directory.
+        if (str_starts_with($trimmed, '/')) {
+            return $trimmed;
+        }
+
+        if (str_starts_with($trimmed, 'http://') || str_starts_with($trimmed, 'https://')) {
+            return $trimmed;
+        }
+
+        return '/' . ltrim($trimmed, '/');
+    };
+
+    $normalizeGridValue = static function (int $value): int {
+        if (HOUSE_GRID_WALKABLE_UNIT > 0 && $value % HOUSE_GRID_WALKABLE_UNIT === 0) {
+            return (int) round($value / HOUSE_GRID_WALKABLE_UNIT);
+        }
+
+        return $value;
+    };
+
+    $normalizeSide = static function (array $wall, string $prefix, callable $normalizeSpritePath): ?array {
+        $sprite = $wall[$prefix . '_sprite_path'] ?? null;
         $material = $wall[$prefix . '_material'] ?? null;
         $tint = $wall[$prefix . '_tint'] ?? null;
         $isOutsideKey = $prefix . '_is_outside';
@@ -497,8 +527,10 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
             return null;
         }
 
+        $normalizedSprite = $normalizeSpritePath($sprite);
+
         return [
-            'sprite' => $sprite,
+            'sprite_path' => $normalizedSprite,
             'material' => $material,
             'is_outside' => $isOutside,
             'tint' => $tint,
@@ -507,11 +539,17 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
 
     $result = [];
     foreach ($walls as $wall) {
-        $startX = (int) $wall['start_x'];
-        $startY = (int) $wall['start_y'];
-        $endX = (int) $wall['end_x'];
-        $endY = (int) $wall['end_y'];
+        $rawStartX = (int) $wall['start_x'];
+        $rawStartY = (int) $wall['start_y'];
+        $rawEndX = (int) $wall['end_x'];
+        $rawEndY = (int) $wall['end_y'];
 
+        $startX = $normalizeGridValue($rawStartX);
+        $startY = $normalizeGridValue($rawStartY);
+        $endX = $normalizeGridValue($rawEndX);
+        $endY = $normalizeGridValue($rawEndY);
+
+        $orientation = 'unknown';
         if ($startY === $endY) {
             if ($startX > $endX) {
                 [$startX, $endX] = [$endX, $startX];
@@ -522,27 +560,24 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
                 [$startY, $endY] = [$endY, $startY];
             }
             $orientation = 'vertical';
-        } else {
-            $orientation = 'unknown';
         }
-
-        $startColIndex = convert_pixels_to_grid_line_index($startX);
-        $endColIndex = convert_pixels_to_grid_line_index($endX);
-        $startRowIndex = convert_pixels_to_grid_line_index($startY);
-        $endRowIndex = convert_pixels_to_grid_line_index($endY);
 
         $result[] = [
             'id' => (int) $wall['id'],
             'room_id' => (int) $wall['room_id'],
-            'start_col' => grid_label_from_index($startColIndex),
-            'start_row' => convert_grid_line_index_to_row_number($startRowIndex),
-            'end_col' => grid_label_from_index($endColIndex),
-            'end_row' => convert_grid_line_index_to_row_number($endRowIndex),
+            'start' => [
+                'x' => $startX,
+                'y' => $startY,
+            ],
+            'end' => [
+                'x' => $endX,
+                'y' => $endY,
+            ],
             'orientation' => $orientation,
             'status' => $wall['status'],
             'sides' => [
-                'A' => $normalizeSide($wall, 'side_a'),
-                'B' => $normalizeSide($wall, 'side_b'),
+                'A' => $normalizeSide($wall, 'side_a', $normalizeSpritePath),
+                'B' => $normalizeSide($wall, 'side_b', $normalizeSpritePath),
             ],
         ];
     }

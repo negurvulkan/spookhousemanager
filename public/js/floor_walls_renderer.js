@@ -1,6 +1,7 @@
 (function () {
     const DEFAULT_CELL_SIZE = 32;
     const SPRITE_CACHE = new Map();
+    const WALL_THICKNESS_RATIO = 0.25;
 
     function colToIndex(col) {
         if (!col) {
@@ -45,50 +46,188 @@
         SPRITE_CACHE.set(spritePath, image);
     }
 
-    function renderWalls(ctx, data, cellSize) {
+    function normalizeNumber(value, fallback = 0) {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed !== '') {
+                const parsed = Number(trimmed);
+                if (Number.isFinite(parsed)) {
+                    return parsed;
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    function resolveSpritePath(side) {
+        if (!side) {
+            return null;
+        }
+
+        return side.sprite_path || side.sprite || null;
+    }
+
+    function normalizeWallData(wall) {
+        if (!wall) {
+            return null;
+        }
+
+        const start = wall.start || {};
+        const end = wall.end || {};
+
+        let startX;
+        let startY;
+        let endX;
+        let endY;
+        let orientation = wall.orientation || null;
+
+        if (typeof start.x !== 'undefined' || typeof start.y !== 'undefined') {
+            startX = normalizeNumber(start.x);
+            startY = normalizeNumber(start.y);
+        }
+
+        if (typeof end.x !== 'undefined' || typeof end.y !== 'undefined') {
+            endX = normalizeNumber(end.x);
+            endY = normalizeNumber(end.y);
+        }
+
+        if (typeof startX === 'undefined' || typeof startY === 'undefined' ||
+            typeof endX === 'undefined' || typeof endY === 'undefined') {
+            const startCol = typeof wall.start_col !== 'undefined' ? wall.start_col : wall.startCol;
+            const endCol = typeof wall.end_col !== 'undefined' ? wall.end_col : wall.endCol;
+            const startRow = typeof wall.start_row !== 'undefined' ? wall.start_row : wall.startRow;
+            const endRow = typeof wall.end_row !== 'undefined' ? wall.end_row : wall.endRow;
+
+            if (typeof startX === 'undefined' && typeof startCol !== 'undefined') {
+                startX = colToIndex(startCol);
+            }
+            if (typeof endX === 'undefined' && typeof endCol !== 'undefined') {
+                endX = colToIndex(endCol);
+            }
+            if (typeof startY === 'undefined' && typeof startRow !== 'undefined') {
+                startY = normalizeNumber(startRow);
+            }
+            if (typeof endY === 'undefined' && typeof endRow !== 'undefined') {
+                endY = normalizeNumber(endRow);
+            }
+        }
+
+        if (typeof startX === 'undefined' || typeof startY === 'undefined' ||
+            typeof endX === 'undefined' || typeof endY === 'undefined') {
+            return null;
+        }
+
+        const isHorizontal = startY === endY;
+        const isVertical = startX === endX;
+
+        if (!orientation) {
+            if (isHorizontal) {
+                orientation = 'horizontal';
+            } else if (isVertical) {
+                orientation = 'vertical';
+            } else {
+                orientation = 'unknown';
+            }
+        }
+
+        if (orientation === 'horizontal' && startX > endX) {
+            const tmp = startX;
+            startX = endX;
+            endX = tmp;
+        }
+
+        if (orientation === 'vertical' && startY > endY) {
+            const tmp = startY;
+            startY = endY;
+            endY = tmp;
+        }
+
+        return {
+            startX,
+            startY,
+            endX,
+            endY,
+            orientation,
+            sides: wall.sides || {},
+        };
+    }
+
+    function renderWalls(ctx, data, cellSize, wallThickness, offset) {
         if (!data || !Array.isArray(data.walls)) {
             return;
         }
 
-        data.walls.forEach((wall) => {
-            const sx = colToIndex(wall.start_col) * cellSize;
-            const sy = wall.start_row * cellSize;
-            const ex = colToIndex(wall.end_col) * cellSize;
-            const ey = wall.end_row * cellSize;
-            const isHorizontal = (sy === ey);
+        data.walls.forEach((rawWall) => {
+            const wall = normalizeWallData(rawWall);
+            if (!wall) {
+                return;
+            }
 
-            if (isHorizontal) {
-                if (wall.sides.A && wall.sides.A.sprite) {
-                    drawWallSprite(ctx, wall.sides.A.sprite, sx, sy - 6, ex - sx || cellSize, 12);
+            const { startX, startY, endX, endY, orientation, sides } = wall;
+
+            const startPixelX = startX * cellSize + offset;
+            const startPixelY = startY * cellSize + offset;
+            const endPixelX = endX * cellSize + offset;
+            const endPixelY = endY * cellSize + offset;
+
+            if (orientation === 'horizontal') {
+                const width = Math.max(cellSize, Math.abs(endPixelX - startPixelX));
+                const topY = startPixelY - wallThickness;
+                const bottomY = startPixelY;
+
+                const sideAPath = resolveSpritePath(sides.A);
+                const sideBPath = resolveSpritePath(sides.B);
+
+                if (sideAPath) {
+                    drawWallSprite(ctx, sideAPath, Math.min(startPixelX, endPixelX), topY, width, wallThickness);
                 }
-                if (wall.sides.B && wall.sides.B.sprite) {
-                    drawWallSprite(ctx, wall.sides.B.sprite, sx, sy + (cellSize - 6), ex - sx || cellSize, 12);
+
+                if (sideBPath) {
+                    drawWallSprite(ctx, sideBPath, Math.min(startPixelX, endPixelX), bottomY, width, wallThickness);
                 }
-            } else {
-                if (wall.sides.A && wall.sides.A.sprite) {
-                    drawWallSprite(ctx, wall.sides.A.sprite, sx - 6, sy, 12, ey - sy || cellSize);
+            } else if (orientation === 'vertical') {
+                const height = Math.max(cellSize, Math.abs(endPixelY - startPixelY));
+                const leftX = startPixelX - wallThickness;
+                const rightX = startPixelX;
+
+                const sideAPath = resolveSpritePath(sides.A);
+                const sideBPath = resolveSpritePath(sides.B);
+
+                if (sideAPath) {
+                    drawWallSprite(ctx, sideAPath, leftX, Math.min(startPixelY, endPixelY), wallThickness, height);
                 }
-                if (wall.sides.B && wall.sides.B.sprite) {
-                    drawWallSprite(ctx, wall.sides.B.sprite, sx + (cellSize - 6), sy, 12, ey - sy || cellSize);
+
+                if (sideBPath) {
+                    drawWallSprite(ctx, sideBPath, rightX, Math.min(startPixelY, endPixelY), wallThickness, height);
                 }
             }
         });
     }
 
-    function determineCanvasSize(data, cellSize) {
-        let maxCol = 0;
-        let maxRow = 0;
+    function determineCanvasSize(data, cellSize, offset) {
+        let maxX = 0;
+        let maxY = 0;
 
         if (data && Array.isArray(data.walls)) {
-            data.walls.forEach((wall) => {
-                maxCol = Math.max(maxCol, colToIndex(wall.start_col), colToIndex(wall.end_col));
-                maxRow = Math.max(maxRow, wall.start_row, wall.end_row);
+            data.walls.forEach((rawWall) => {
+                const wall = normalizeWallData(rawWall);
+                if (!wall) {
+                    return;
+                }
+
+                maxX = Math.max(maxX, wall.startX, wall.endX);
+                maxY = Math.max(maxY, wall.startY, wall.endY);
             });
         }
 
         return {
-            width: (maxCol + 2) * cellSize,
-            height: (maxRow + 2) * cellSize,
+            width: (Math.max(0, maxX) + 1) * cellSize + offset * 2,
+            height: (Math.max(0, maxY) + 1) * cellSize + offset * 2,
         };
     }
 
@@ -105,11 +244,13 @@
         fetch(`${apiEndpoint}?floor_id=${encodeURIComponent(floorId)}`, { credentials: 'same-origin' })
             .then((response) => response.json())
             .then((data) => {
-                const dimensions = determineCanvasSize(data, cellSize);
+                const wallThickness = Math.max(4, Math.round(cellSize * WALL_THICKNESS_RATIO));
+                const offset = Math.max(cellSize, wallThickness * 2);
+                const dimensions = determineCanvasSize(data, cellSize, offset);
                 canvas.width = dimensions.width;
                 canvas.height = dimensions.height;
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                renderWalls(ctx, data, cellSize);
+                renderWalls(ctx, data, cellSize, wallThickness, offset);
             })
             .catch(() => {
                 // Example script: intentionally minimal error handling
@@ -127,7 +268,19 @@
         fetchAndRenderWalls(canvas);
     });
 
-    window.renderWalls = renderWalls;
+    function renderWallsWithDefaults(ctx, data, cellSize = DEFAULT_CELL_SIZE, wallThickness, offset) {
+        const resolvedCellSize = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : DEFAULT_CELL_SIZE;
+        const resolvedThickness = Number.isFinite(wallThickness) && wallThickness > 0
+            ? wallThickness
+            : Math.max(4, Math.round(resolvedCellSize * WALL_THICKNESS_RATIO));
+        const resolvedOffset = Number.isFinite(offset) && offset > 0
+            ? offset
+            : Math.max(resolvedCellSize, resolvedThickness * 2);
+
+        renderWalls(ctx, data, resolvedCellSize, resolvedThickness, resolvedOffset);
+    }
+
+    window.renderWalls = renderWallsWithDefaults;
     window.drawWallSprite = drawWallSprite;
     window.colToIndex = colToIndex;
 })();
