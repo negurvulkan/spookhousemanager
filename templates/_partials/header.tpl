@@ -14,23 +14,39 @@
             font-weight: bold;
             letter-spacing: 0.05em;
         }
-        .house-canvas {
-            position: relative;
-            width: 420px;
-            height: 320px;
+        .house-grid-wrapper {
             background-color: #1d1d2f;
             border: 1px solid #343a40;
-            margin-bottom: 2rem;
+            border-radius: 0.5rem;
+            padding: 1.25rem;
         }
-        .house-wall {
-            position: absolute;
-            background-color: #adb5bd;
+        .house-grid-svg {
+            width: 100%;
+            height: auto;
+            display: block;
         }
-        .house-wall.vertical {
-            width: 4px;
+        .grid-walkable {
+            fill: rgba(173, 181, 189, 0.12);
         }
-        .house-wall.horizontal {
-            height: 4px;
+        .grid-line {
+            stroke: rgba(173, 181, 189, 0.35);
+            stroke-width: 1;
+        }
+        .grid-line.structural {
+            stroke: rgba(233, 236, 239, 0.8);
+            stroke-width: 2;
+        }
+        .room-boundary {
+            fill: rgba(0, 168, 255, 0.15);
+            stroke: rgba(0, 168, 255, 0.85);
+            stroke-width: 3;
+        }
+        .room-boundary:hover {
+            fill: rgba(0, 168, 255, 0.25);
+        }
+        .room-coordinate-label {
+            font-size: 0.65rem;
+            fill: #adb5bd;
         }
     </style>
 </head>
