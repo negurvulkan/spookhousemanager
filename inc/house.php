@@ -67,6 +67,49 @@ function convert_grid_to_pixels(int $index): int
     return (int) floor($index / 2) * HOUSE_GRID_WALKABLE_UNIT;
 }
 
+function is_point_on_segment(float $px, float $py, float $ax, float $ay, float $bx, float $by): bool
+{
+    $cross = ($py - $ay) * ($bx - $ax) - ($px - $ax) * ($by - $ay);
+    if (abs($cross) > 1e-9) {
+        return false;
+    }
+
+    $dot = ($px - $ax) * ($px - $bx) + ($py - $ay) * ($py - $by);
+
+    return $dot <= 0;
+}
+
+function is_point_in_polygon(float $x, float $y, array $polygon): bool
+{
+    $numPoints = count($polygon);
+    if ($numPoints < 3) {
+        return false;
+    }
+
+    $inside = false;
+    $j = $numPoints - 1;
+    for ($i = 0; $i < $numPoints; $i++) {
+        $xi = $polygon[$i]['x'];
+        $yi = $polygon[$i]['y'];
+        $xj = $polygon[$j]['x'];
+        $yj = $polygon[$j]['y'];
+
+        if (is_point_on_segment($x, $y, $xi, $yi, $xj, $yj)) {
+            return true;
+        }
+
+        $denominator = $yj - $yi;
+        if ((($yi > $y) !== ($yj > $y)) &&
+            ($x < ($xj - $xi) * ($y - $yi) / ($denominator !== 0.0 ? $denominator : 1e-9) + $xi)) {
+            $inside = !$inside;
+        }
+
+        $j = $i;
+    }
+
+    return $inside;
+}
+
 function build_rectangular_room_boundary(int $gridWidth, int $gridHeight): array
 {
     $maxRow = $gridHeight * 2;
@@ -157,24 +200,13 @@ function build_floor_layout(int $floorId): ?array
         ];
     }
 
-    $walkableCells = [];
-    for ($r = 1; $r < $totalRows; $r += 2) {
-        for ($c = 1; $c < $totalColumns; $c += 2) {
-            $walkableCells[] = [
-                'x' => ($c - 1) * $unit,
-                'y' => ($r - 1) * $unit,
-                'width' => 2 * $unit,
-                'height' => 2 * $unit,
-                'label' => grid_label_from_index($r) . ':' . grid_label_from_index($c),
-            ];
-        }
-    }
-
     $roomsLayout = [];
+    $roomPolygons = [];
     foreach ($rooms as $room) {
         $boundary = $room['boundary'];
         $points = [];
         $labels = [];
+        $gridPoints = [];
         foreach ($boundary as $coordinate) {
             try {
                 $parsed = parse_grid_coordinate($coordinate);
@@ -186,10 +218,23 @@ function build_floor_layout(int $floorId): ?array
             $y = ($parsed['row']) * $unit;
             $points[] = $x . ',' . $y;
             $labels[] = $coordinate;
+            $gridPoints[] = ['x' => (float) $parsed['col'], 'y' => (float) $parsed['row']];
+        }
+
+        if (count($gridPoints) > 1) {
+            $firstPoint = $gridPoints[0];
+            $lastPoint = $gridPoints[count($gridPoints) - 1];
+            if ($firstPoint['x'] === $lastPoint['x'] && $firstPoint['y'] === $lastPoint['y']) {
+                array_pop($gridPoints);
+            }
         }
 
         if (!empty($points) && $points[0] !== end($points)) {
             $points[] = $points[0];
+        }
+
+        if (!empty($gridPoints)) {
+            $roomPolygons[(int) $room['id']] = $gridPoints;
         }
 
         $roomsLayout[] = [
@@ -199,8 +244,50 @@ function build_floor_layout(int $floorId): ?array
             'pathLabels' => $labels,
             'gridWidth' => (int) $room['grid_width'],
             'gridHeight' => (int) $room['grid_height'],
+            'cells' => [],
         ];
     }
+
+    $walkableCells = [];
+    $roomCells = [];
+    foreach ($roomPolygons as $roomId => $_) {
+        $roomCells[$roomId] = [];
+    }
+
+    for ($r = 1; $r < $totalRows; $r += 2) {
+        for ($c = 1; $c < $totalColumns; $c += 2) {
+            $label = grid_label_from_index($r) . ':' . grid_label_from_index($c);
+            $cellBelongs = false;
+            $cellRooms = [];
+
+            foreach ($roomPolygons as $roomId => $polygon) {
+                if (is_point_in_polygon((float) $c, (float) $r, $polygon)) {
+                    $roomCells[$roomId][] = $label;
+                    $cellBelongs = true;
+                    $cellRooms[] = $roomId;
+                }
+            }
+
+            if ($cellBelongs) {
+                $walkableCells[] = [
+                    'x' => ($c - 1) * $unit,
+                    'y' => ($r - 1) * $unit,
+                    'width' => 2 * $unit,
+                    'height' => 2 * $unit,
+                    'label' => $label,
+                    'roomIds' => $cellRooms,
+                ];
+            }
+        }
+    }
+
+    foreach ($roomsLayout as &$roomLayout) {
+        $roomId = $roomLayout['id'];
+        if (isset($roomCells[$roomId])) {
+            $roomLayout['cells'] = $roomCells[$roomId];
+        }
+    }
+    unset($roomLayout);
 
     return [
         'svgWidth' => $svgWidth,
