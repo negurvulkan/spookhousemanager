@@ -67,6 +67,28 @@
                             </div>
                         {/foreach}
                     </div>
+                    <div class="mt-4">
+                        <div class="card bg-dark border-secondary shadow-sm">
+                            <div class="card-body">
+                                <h2 class="h5 text-uppercase text-secondary mb-3">Wandtexturen</h2>
+                                <p class="text-muted small">Die Wände dieser Ebene werden anhand der zugewiesenen Texturen dargestellt. Seite A liegt bei horizontalen Wänden oberhalb der Linie, Seite B darunter. Bei vertikalen Wänden liegt Seite A links und Seite B rechts.</p>
+                                <div class="text-center">
+                                    <canvas
+                                        id="houseCanvas"
+                                        class="border border-secondary rounded bg-black"
+                                        width="640"
+                                        height="480"
+                                        data-floor-id="{$selectedFloorId|escape}"
+                                        data-api-endpoint="/api/get_floor_walls.php"
+                                        data-cell-size="32"
+                                    ></canvas>
+                                </div>
+                            </div>
+                            <div class="card-footer border-secondary">
+                                <small class="text-secondary">Sprites werden nach Bedarf geladen. Nicht definierte Seiten bleiben transparent.</small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             {else}
                 <div class="alert alert-info">Für diese Ebene sind noch keine Raumgrenzen hinterlegt.</div>
@@ -76,4 +98,7 @@
         {/if}
     </div>
 </div>
+{if $selectedFloorId}
+    <script src="/js/floor_walls_renderer.js" defer></script>
+{/if}
 {include file='_partials/footer.tpl'}
