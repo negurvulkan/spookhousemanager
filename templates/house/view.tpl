@@ -55,7 +55,7 @@
                                 <div class="card bg-dark border-secondary h-100">
                                     <div class="card-body">
                                         <h2 class="h5 card-title mb-2">{$room.name|escape}</h2>
-                                        <p class="mb-2 small text-secondary">Rastergröße: {$room.gridWidth} × {$room.gridHeight} Felder</p>
+                                        <p class="mb-2 small text-secondary">Rastergröße: {$floorLayout.gridWidth} × {$floorLayout.gridHeight} Felder</p>
                                         <p class="mb-0 small">
                                             <span class="text-uppercase text-secondary">Pfad:</span>
                                             {foreach from=$room.pathLabels item=label name=labels}

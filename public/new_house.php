@@ -18,7 +18,10 @@ if ($name === '') {
 }
 
 $houseId = create_house((int) $currentUser['id'], $name);
-generateInitialHouse($houseId);
+$house = get_house_by_id($houseId, (int) $currentUser['id']);
+if ($house) {
+    generateInitialHouse($house);
+}
 
 header('Location: /house_view.php?id=' . $houseId);
 exit;
