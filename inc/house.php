@@ -137,7 +137,7 @@ function build_rectangular_room_boundary(int $gridWidth, int $gridHeight): array
 function get_rooms_with_boundaries_by_floor_id(int $floorId): array
 {
     $db = getDb();
-    $stmt = $db->prepare('SELECT id, floor_id, name, grid_width, grid_height, boundary_path FROM rooms WHERE floor_id = :floor_id');
+    $stmt = $db->prepare('SELECT id, floor_id, name, boundary_path FROM rooms WHERE floor_id = :floor_id');
     $stmt->execute(['floor_id' => $floorId]);
 
     $rooms = [];
@@ -163,23 +163,31 @@ function get_rooms_with_boundaries_by_floor_id(int $floorId): array
 
 function build_floor_layout(int $floorId): ?array
 {
+    $db = getDb();
+
+    $floorStmt = $db->prepare(
+        'SELECT f.house_id, h.grid_width, h.grid_height
+        FROM floors f
+        INNER JOIN houses h ON f.house_id = h.id
+        WHERE f.id = :floor_id'
+    );
+    $floorStmt->execute(['floor_id' => $floorId]);
+    $floor = $floorStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$floor) {
+        return null;
+    }
+
+    $houseGridWidth = max(1, (int) ($floor['grid_width'] ?? 0));
+    $houseGridHeight = max(1, (int) ($floor['grid_height'] ?? 0));
+
     $rooms = get_rooms_with_boundaries_by_floor_id($floorId);
     if (empty($rooms)) {
         return null;
     }
 
-    $maxWidth = 0;
-    $maxHeight = 0;
-    foreach ($rooms as $room) {
-        $maxWidth = max($maxWidth, (int) $room['grid_width']);
-        $maxHeight = max($maxHeight, (int) $room['grid_height']);
-    }
-
-    $maxWidth = max(1, $maxWidth);
-    $maxHeight = max(1, $maxHeight);
-
-    $totalColumns = $maxWidth * 2 + 1;
-    $totalRows = $maxHeight * 2 + 1;
+    $totalColumns = $houseGridWidth * 2 + 1;
+    $totalRows = $houseGridHeight * 2 + 1;
     $unit = 40; // visuelle Skalierung
 
     $columnLabels = [];
@@ -254,8 +262,8 @@ function build_floor_layout(int $floorId): ?array
             'name' => $room['name'],
             'polygonPoints' => implode(' ', $points),
             'pathLabels' => $labels,
-            'gridWidth' => (int) $room['grid_width'],
-            'gridHeight' => (int) $room['grid_height'],
+            'gridWidth' => $houseGridWidth,
+            'gridHeight' => $houseGridHeight,
             'cells' => [],
         ];
     }
@@ -304,6 +312,8 @@ function build_floor_layout(int $floorId): ?array
     return [
         'svgWidth' => $svgWidth,
         'svgHeight' => $svgHeight,
+        'gridWidth' => $houseGridWidth,
+        'gridHeight' => $houseGridHeight,
         'unit' => $unit,
         'columnLabels' => $columnLabels,
         'rowLabels' => $rowLabels,
@@ -313,13 +323,19 @@ function build_floor_layout(int $floorId): ?array
     ];
 }
 
-function create_house(int $userId, string $name): int
+function create_house(int $userId, string $name, int $gridWidth = 4, int $gridHeight = 3): int
 {
     $db = getDb();
-    $stmt = $db->prepare('INSERT INTO houses (user_id, name, created_at) VALUES (:user_id, :name, NOW())');
+
+    $normalizedWidth = max(1, $gridWidth);
+    $normalizedHeight = max(1, $gridHeight);
+
+    $stmt = $db->prepare('INSERT INTO houses (user_id, name, grid_width, grid_height, created_at) VALUES (:user_id, :name, :grid_width, :grid_height, NOW())');
     $stmt->execute([
         'user_id' => $userId,
         'name' => $name,
+        'grid_width' => $normalizedWidth,
+        'grid_height' => $normalizedHeight,
     ]);
 
     return (int) $db->lastInsertId();
@@ -359,7 +375,7 @@ function get_floors_by_house_id(int $houseId): array
 function get_floor_with_house_by_id(int $floorId): ?array
 {
     $db = getDb();
-    $stmt = $db->prepare('SELECT f.*, h.user_id, h.name AS house_name FROM floors f INNER JOIN houses h ON f.house_id = h.id WHERE f.id = :id');
+    $stmt = $db->prepare('SELECT f.*, h.user_id, h.name AS house_name, h.grid_width, h.grid_height FROM floors f INNER JOIN houses h ON f.house_id = h.id WHERE f.id = :id');
     $stmt->execute(['id' => $floorId]);
     $floor = $stmt->fetch();
 
@@ -369,7 +385,7 @@ function get_floor_with_house_by_id(int $floorId): ?array
 function get_room_with_house_by_id(int $roomId): ?array
 {
     $db = getDb();
-    $sql = 'SELECT r.*, f.house_id, f.level, h.user_id, h.name AS house_name
+    $sql = 'SELECT r.*, f.house_id, f.level, h.user_id, h.name AS house_name, h.grid_width, h.grid_height
             FROM rooms r
             INNER JOIN floors f ON r.floor_id = f.id
             INNER JOIN houses h ON f.house_id = h.id
@@ -585,9 +601,13 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
     return $result;
 }
 
-function generateInitialHouse(int $houseId): void
+function generateInitialHouse(array $house): void
 {
     $db = getDb();
+
+    $houseId = (int) $house['id'];
+    $gridWidth = max(1, (int) ($house['grid_width'] ?? 4));
+    $gridHeight = max(1, (int) ($house['grid_height'] ?? 3));
 
     $db->beginTransaction();
     try {
@@ -598,16 +618,12 @@ function generateInitialHouse(int $houseId): void
         ]);
         $floorId = (int) $db->lastInsertId();
 
-        $gridWidth = 4;
-        $gridHeight = 3;
         $boundary = build_rectangular_room_boundary($gridWidth, $gridHeight);
 
-        $stmt = $db->prepare('INSERT INTO rooms (floor_id, name, style_id, grid_width, grid_height, boundary_path, created_at) VALUES (:floor_id, :name, NULL, :grid_width, :grid_height, :boundary_path, NOW())');
+        $stmt = $db->prepare('INSERT INTO rooms (floor_id, name, style_id, boundary_path, created_at) VALUES (:floor_id, :name, NULL, :boundary_path, NOW())');
         $stmt->execute([
             'floor_id' => $floorId,
             'name' => 'Foyer',
-            'grid_width' => $gridWidth,
-            'grid_height' => $gridHeight,
             'boundary_path' => json_encode($boundary, JSON_THROW_ON_ERROR),
         ]);
         $roomId = (int) $db->lastInsertId();

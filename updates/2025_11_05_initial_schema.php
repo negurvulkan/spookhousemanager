@@ -24,6 +24,8 @@ return static function (PDO $db): void {
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
             name VARCHAR(150) NOT NULL,
+            grid_width INT NOT NULL DEFAULT 4,
+            grid_height INT NOT NULL DEFAULT 3,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_houses_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
             INDEX idx_houses_user (user_id)
