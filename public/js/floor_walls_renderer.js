@@ -209,7 +209,7 @@
         });
     }
 
-    function determineCanvasSize(data, cellSize, offset) {
+    function computeGridExtents(data) {
         let maxX = 0;
         let maxY = 0;
 
@@ -225,10 +225,65 @@
             });
         }
 
+        const maxColumnIndex = Math.ceil(Math.max(0, maxX));
+        const maxRowIndex = Math.ceil(Math.max(0, maxY));
+
         return {
-            width: (Math.max(0, maxX) + 1) * cellSize + offset * 2,
-            height: (Math.max(0, maxY) + 1) * cellSize + offset * 2,
+            maxX,
+            maxY,
+            columns: Math.max(1, maxColumnIndex + 1),
+            rows: Math.max(1, maxRowIndex + 1),
         };
+    }
+
+    function determineCanvasSize(data, cellSize, offset) {
+        const extents = computeGridExtents(data);
+
+        return {
+            width: extents.columns * cellSize + offset * 2,
+            height: extents.rows * cellSize + offset * 2,
+            columns: extents.columns,
+            rows: extents.rows,
+        };
+    }
+
+    function renderGrid(ctx, columns, rows, cellSize, offset) {
+        if (!ctx || !Number.isFinite(columns) || !Number.isFinite(rows)) {
+            return;
+        }
+
+        const totalWidth = columns * cellSize;
+        const totalHeight = rows * cellSize;
+
+        ctx.save();
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.35)';
+        ctx.fillRect(offset, offset, totalWidth, totalHeight);
+
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+
+        for (let col = 0; col <= columns; col += 1) {
+            const x = offset + col * cellSize;
+            ctx.beginPath();
+            ctx.moveTo(x, offset);
+            ctx.lineTo(x, offset + totalHeight);
+            ctx.stroke();
+        }
+
+        for (let row = 0; row <= rows; row += 1) {
+            const y = offset + row * cellSize;
+            ctx.beginPath();
+            ctx.moveTo(offset, y);
+            ctx.lineTo(offset + totalWidth, y);
+            ctx.stroke();
+        }
+
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(248, 250, 252, 0.4)';
+        ctx.strokeRect(offset, offset, totalWidth, totalHeight);
+
+        ctx.restore();
     }
 
     function fetchAndRenderWalls(canvas) {
@@ -250,6 +305,7 @@
                 canvas.width = dimensions.width;
                 canvas.height = dimensions.height;
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
+                renderGrid(ctx, dimensions.columns, dimensions.rows, cellSize, offset);
                 renderWalls(ctx, data, cellSize, wallThickness, offset);
             })
             .catch(() => {
@@ -277,6 +333,11 @@
             ? offset
             : Math.max(resolvedCellSize, resolvedThickness * 2);
 
+        const extents = computeGridExtents(data);
+        if (ctx && ctx.canvas) {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        }
+        renderGrid(ctx, extents.columns, extents.rows, resolvedCellSize, resolvedOffset);
         renderWalls(ctx, data, resolvedCellSize, resolvedThickness, resolvedOffset);
     }
 
