@@ -134,29 +134,210 @@ function build_rectangular_room_boundary(int $gridWidth, int $gridHeight): array
     ];
 }
 
-function get_rooms_with_boundaries_by_floor_id(int $floorId): array
+function build_room_boundary_from_walls(array $walls): array
 {
-    $db = getDb();
-    $stmt = $db->prepare('SELECT id, floor_id, name, boundary_path FROM rooms WHERE floor_id = :floor_id');
-    $stmt->execute(['floor_id' => $floorId]);
+    if (empty($walls)) {
+        return [];
+    }
 
-    $rooms = [];
-    while ($row = $stmt->fetch()) {
-        $boundary = [];
-        // TODO: boundary_path später aus walls rekonstruieren
-        // aktuelle Anzeige nutzt walls als Quelle für die Darstellung
-        if (!empty($row['boundary_path'])) {
-            $decoded = json_decode($row['boundary_path'], true);
-            if (is_array($decoded)) {
-                $boundary = array_values(array_filter($decoded, static function ($item) {
-                    return is_string($item) && strpos($item, ':') !== false;
-                }));
+    $edges = [];
+    foreach ($walls as $wall) {
+        $start = [
+            'x' => convert_pixels_to_grid_line_index((int) $wall['start_x']),
+            'y' => convert_pixels_to_grid_line_index((int) $wall['start_y']),
+        ];
+        $end = [
+            'x' => convert_pixels_to_grid_line_index((int) $wall['end_x']),
+            'y' => convert_pixels_to_grid_line_index((int) $wall['end_y']),
+        ];
+
+        if ($start['x'] === $end['x'] && $start['y'] === $end['y']) {
+            continue;
+        }
+
+        $edges[] = ['start' => $start, 'end' => $end];
+    }
+
+    if (empty($edges)) {
+        return [];
+    }
+
+    $points = [];
+    foreach ($edges as $edge) {
+        $points[] = $edge['start'];
+        $points[] = $edge['end'];
+    }
+
+    $startPoint = array_reduce($points, static function (?array $carry, array $point) {
+        if ($carry === null) {
+            return $point;
+        }
+
+        if ($point['y'] < $carry['y']) {
+            return $point;
+        }
+
+        if ($point['y'] === $carry['y'] && $point['x'] < $carry['x']) {
+            return $point;
+        }
+
+        return $carry;
+    }, null);
+
+    if ($startPoint === null) {
+        return [];
+    }
+
+    $pointsAreEqual = static function (array $a, array $b): bool {
+        return (int) $a['x'] === (int) $b['x'] && (int) $a['y'] === (int) $b['y'];
+    };
+
+    $chooseInitialEdge = static function (array $edges, array $startPoint, callable $pointsAreEqual): ?int {
+        $selectedIndex = null;
+        $selectedTarget = null;
+
+        foreach ($edges as $index => $edge) {
+            if ($pointsAreEqual($edge['start'], $startPoint)) {
+                $candidate = $edge['end'];
+            } elseif ($pointsAreEqual($edge['end'], $startPoint)) {
+                $candidate = $edge['start'];
+            } else {
+                continue;
+            }
+
+            $isHorizontal = (int) $candidate['y'] === (int) $startPoint['y'];
+
+            if ($selectedIndex === null) {
+                $selectedIndex = $index;
+                $selectedTarget = $candidate;
+                continue;
+            }
+
+            $selectedIsHorizontal = (int) $selectedTarget['y'] === (int) $startPoint['y'];
+
+            if ($isHorizontal && !$selectedIsHorizontal) {
+                $selectedIndex = $index;
+                $selectedTarget = $candidate;
+                continue;
+            }
+
+            if ($isHorizontal === $selectedIsHorizontal && (int) $candidate['x'] < (int) $selectedTarget['x']) {
+                $selectedIndex = $index;
+                $selectedTarget = $candidate;
             }
         }
 
-        $row['boundary'] = $boundary;
-        $rooms[] = $row;
+        return $selectedIndex;
+    };
+
+    $startEdgeIndex = $chooseInitialEdge($edges, $startPoint, $pointsAreEqual);
+    if ($startEdgeIndex === null) {
+        return [];
     }
+
+    $startEdge = $edges[$startEdgeIndex];
+    if (!$pointsAreEqual($startEdge['start'], $startPoint)) {
+        $startEdge = ['start' => $startEdge['end'], 'end' => $startEdge['start']];
+    }
+
+    $boundaryPoints = [$startEdge['start'], $startEdge['end']];
+    $usedEdges = [$startEdgeIndex => true];
+    $currentPoint = $startEdge['end'];
+    $maxIterations = count($edges) + 5;
+    $iterations = 0;
+
+    while (!$pointsAreEqual($currentPoint, $startPoint) && $iterations < $maxIterations) {
+        $nextEdgeIndex = null;
+        $nextPoint = null;
+
+        foreach ($edges as $index => $edge) {
+            if (isset($usedEdges[$index])) {
+                continue;
+            }
+
+            if ($pointsAreEqual($edge['start'], $currentPoint)) {
+                $nextEdgeIndex = $index;
+                $nextPoint = $edge['end'];
+                break;
+            }
+
+            if ($pointsAreEqual($edge['end'], $currentPoint)) {
+                $nextEdgeIndex = $index;
+                $nextPoint = $edge['start'];
+                break;
+            }
+        }
+
+        if ($nextEdgeIndex === null || $nextPoint === null) {
+            break;
+        }
+
+        $boundaryPoints[] = $nextPoint;
+        $usedEdges[$nextEdgeIndex] = true;
+        $currentPoint = $nextPoint;
+        $iterations++;
+    }
+
+    if (!$pointsAreEqual(end($boundaryPoints), $startPoint)) {
+        $boundaryPoints[] = $startPoint;
+    }
+
+    $coordinates = [];
+    $lastKey = null;
+    foreach ($boundaryPoints as $point) {
+        $key = $point['x'] . ':' . $point['y'];
+        if ($key === $lastKey) {
+            continue;
+        }
+
+        $coordinates[] = format_grid_coordinate((int) $point['y'], (int) $point['x']);
+        $lastKey = $key;
+    }
+
+    if (!empty($coordinates) && $coordinates[0] !== end($coordinates)) {
+        $coordinates[] = $coordinates[0];
+    }
+
+    return $coordinates;
+}
+
+function get_rooms_with_boundaries_by_floor_id(int $floorId): array
+{
+    $db = getDb();
+    $stmt = $db->prepare('SELECT id, floor_id, name FROM rooms WHERE floor_id = :floor_id');
+    $stmt->execute(['floor_id' => $floorId]);
+
+    $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rooms) {
+        return [];
+    }
+
+    $roomIds = array_map(static fn ($room) => (int) $room['id'], $rooms);
+    $wallsByRoom = [];
+
+    if (!empty($roomIds)) {
+        $placeholders = implode(',', array_fill(0, count($roomIds), '?'));
+        $wallStmt = $db->prepare(
+            'SELECT room_id, start_x, start_y, end_x, end_y FROM walls WHERE room_id IN (' . $placeholders . ') ORDER BY room_id, id'
+        );
+        $wallStmt->execute($roomIds);
+
+        while ($wall = $wallStmt->fetch(PDO::FETCH_ASSOC)) {
+            $roomId = (int) $wall['room_id'];
+            $wallsByRoom[$roomId][] = [
+                'start_x' => (int) $wall['start_x'],
+                'start_y' => (int) $wall['start_y'],
+                'end_x' => (int) $wall['end_x'],
+                'end_y' => (int) $wall['end_y'],
+            ];
+        }
+    }
+
+    foreach ($rooms as &$room) {
+        $roomId = (int) $room['id'];
+        $room['boundary'] = build_room_boundary_from_walls($wallsByRoom[$roomId] ?? []);
+    }
+    unset($room);
 
     return $rooms;
 }
@@ -620,11 +801,10 @@ function generateInitialHouse(array $house): void
 
         $boundary = build_rectangular_room_boundary($gridWidth, $gridHeight);
 
-        $stmt = $db->prepare('INSERT INTO rooms (floor_id, name, style_id, boundary_path, created_at) VALUES (:floor_id, :name, NULL, :boundary_path, NOW())');
+        $stmt = $db->prepare('INSERT INTO rooms (floor_id, name, style_id, created_at) VALUES (:floor_id, :name, NULL, NOW())');
         $stmt->execute([
             'floor_id' => $floorId,
             'name' => 'Foyer',
-            'boundary_path' => json_encode($boundary, JSON_THROW_ON_ERROR),
         ]);
         $roomId = (int) $db->lastInsertId();
 
