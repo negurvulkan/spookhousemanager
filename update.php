@@ -44,14 +44,24 @@ foreach ($updateFiles as $file) {
         throw new RuntimeException(sprintf('Update file %s did not return a callable.', $file));
     }
 
-    $db->beginTransaction();
     try {
+        if (!$db->inTransaction()) {
+            $db->beginTransaction();
+        }
+
         $callable($db);
         markUpdateRun($db, $name);
-        $db->commit();
+
+        if ($db->inTransaction()) {
+            $db->commit();
+        }
+
         echo "Executed update {$name}\n";
     } catch (Throwable $exception) {
-        $db->rollBack();
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+
         throw $exception;
     }
 }
