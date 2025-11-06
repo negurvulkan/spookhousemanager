@@ -5,4 +5,5 @@ return [
     'db_user' => 'spookhouse',
     'db_pass' => '',
     'db_charset' => 'utf8mb4',
+    'smarty_path' => __DIR__ . '/../vendor/smarty/smarty/libs/Smarty.class.php',
 ];

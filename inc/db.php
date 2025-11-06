@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/config.php';
+
 function getDb(): PDO
 {
     static $pdo = null;
@@ -31,16 +33,7 @@ function getDb(): PDO
 
 function loadDbConfig(): array
 {
-    $defaultConfigFile = __DIR__ . '/../config/config.php';
-    $localConfigFile = __DIR__ . '/../config/config.local.php';
-
-    if (file_exists($localConfigFile)) {
-        $config = require $localConfigFile;
-    } elseif (file_exists($defaultConfigFile)) {
-        $config = require $defaultConfigFile;
-    } else {
-        throw new RuntimeException('Database configuration file not found.');
-    }
+    $config = loadAppConfig();
 
     $requiredKeys = ['db_host', 'db_name', 'db_user', 'db_pass'];
     foreach ($requiredKeys as $key) {
