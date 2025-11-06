@@ -80,7 +80,7 @@ return static function (PDO $db): void {
 
         if ($dataType != 'int') {
             $db->exec(sprintf(
-                "UPDATE walls SET %1$s = NULL WHERE %1$s IS NOT NULL AND %1$s NOT REGEXP '^[0-9]+$'",
+                'UPDATE walls SET %1$s = NULL WHERE %1$s IS NOT NULL AND %1$s NOT REGEXP \'^[0-9]+$\'',
                 $column
             ));
         }
