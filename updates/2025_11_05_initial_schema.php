@@ -2,8 +2,11 @@
 
 return static function (PDO $db): void {
     $tableExists = static function (string $table) use ($db): bool {
-        $stmt = $db->prepare("SHOW TABLES LIKE :table");
+        $stmt = $db->prepare(
+            'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table'
+        );
         $stmt->execute(['table' => $table]);
+
         return (bool) $stmt->fetchColumn();
     };
 
