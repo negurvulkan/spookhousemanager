@@ -37,7 +37,7 @@ return static function (PDO $db): void {
     if (!$tableExists('wall_sides')) {
         $db->exec('CREATE TABLE wall_sides (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            wall_id INT UNSIGNED NOT NULL,
+            wall_id INT NOT NULL,
             side ENUM(\'A\',\'B\') NOT NULL,
             sprite_path VARCHAR(255) DEFAULT NULL,
             material VARCHAR(50) DEFAULT NULL,
