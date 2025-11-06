@@ -67,6 +67,16 @@ function convert_grid_to_pixels(int $index): int
     return (int) floor($index / 2) * HOUSE_GRID_WALKABLE_UNIT;
 }
 
+function convert_pixels_to_grid_line_index(int $pixels): int
+{
+    return intdiv($pixels, HOUSE_GRID_WALKABLE_UNIT) * 2;
+}
+
+function convert_grid_line_index_to_row_number(int $index): int
+{
+    return intdiv($index, 2) + 1;
+}
+
 function is_point_on_segment(float $px, float $py, float $ax, float $ay, float $bx, float $by): bool
 {
     $cross = ($py - $ay) * ($bx - $ax) - ($px - $ax) * ($by - $ay);
@@ -344,6 +354,16 @@ function get_floors_by_house_id(int $houseId): array
     return $stmt->fetchAll();
 }
 
+function get_floor_with_house_by_id(int $floorId): ?array
+{
+    $db = getDb();
+    $stmt = $db->prepare('SELECT f.*, h.user_id, h.name AS house_name FROM floors f INNER JOIN houses h ON f.house_id = h.id WHERE f.id = :id');
+    $stmt->execute(['id' => $floorId]);
+    $floor = $stmt->fetch();
+
+    return $floor ?: null;
+}
+
 function get_walls_by_floor_id(int $floorId): array
 {
     $db = getDb();
@@ -365,6 +385,88 @@ function get_walls_by_floor_id(int $floorId): array
 
         return $wall;
     }, $walls);
+}
+
+function get_walls_with_sides_by_floor_id(int $floorId): array
+{
+    $db = getDb();
+    $stmt = $db->prepare('SELECT w.id, w.room_id, w.start_x, w.start_y, w.end_x, w.end_y, w.status
+            FROM walls w
+            INNER JOIN rooms r ON w.room_id = r.id
+            WHERE r.floor_id = :floor_id');
+    $stmt->execute(['floor_id' => $floorId]);
+    $walls = $stmt->fetchAll();
+
+    if (!$walls) {
+        return [];
+    }
+
+    $wallIds = array_column($walls, 'id');
+    $sideMap = [];
+
+    if (!empty($wallIds)) {
+        $placeholders = implode(',', array_fill(0, count($wallIds), '?'));
+        $sideStmt = $db->prepare("SELECT wall_id, side, sprite_path, material, is_outside, tint FROM wall_sides WHERE wall_id IN ({$placeholders})");
+        $sideStmt->execute($wallIds);
+
+        while ($row = $sideStmt->fetch()) {
+            $wallId = (int) $row['wall_id'];
+            $side = $row['side'];
+            if (!isset($sideMap[$wallId])) {
+                $sideMap[$wallId] = [];
+            }
+            $sideMap[$wallId][$side] = [
+                'sprite' => $row['sprite_path'],
+                'material' => $row['material'],
+                'is_outside' => isset($row['is_outside']) ? (int) $row['is_outside'] : 0,
+                'tint' => $row['tint'],
+            ];
+        }
+    }
+
+    $result = [];
+    foreach ($walls as $wall) {
+        $startX = (int) $wall['start_x'];
+        $startY = (int) $wall['start_y'];
+        $endX = (int) $wall['end_x'];
+        $endY = (int) $wall['end_y'];
+
+        if ($startY === $endY) {
+            if ($startX > $endX) {
+                [$startX, $endX] = [$endX, $startX];
+            }
+            $orientation = 'horizontal';
+        } elseif ($startX === $endX) {
+            if ($startY > $endY) {
+                [$startY, $endY] = [$endY, $startY];
+            }
+            $orientation = 'vertical';
+        } else {
+            $orientation = 'unknown';
+        }
+
+        $startColIndex = convert_pixels_to_grid_line_index($startX);
+        $endColIndex = convert_pixels_to_grid_line_index($endX);
+        $startRowIndex = convert_pixels_to_grid_line_index($startY);
+        $endRowIndex = convert_pixels_to_grid_line_index($endY);
+
+        $result[] = [
+            'id' => (int) $wall['id'],
+            'room_id' => (int) $wall['room_id'],
+            'start_col' => grid_label_from_index($startColIndex),
+            'start_row' => convert_grid_line_index_to_row_number($startRowIndex),
+            'end_col' => grid_label_from_index($endColIndex),
+            'end_row' => convert_grid_line_index_to_row_number($endRowIndex),
+            'orientation' => $orientation,
+            'status' => $wall['status'],
+            'sides' => [
+                'A' => $sideMap[$wall['id']]['A'] ?? null,
+                'B' => $sideMap[$wall['id']]['B'] ?? null,
+            ],
+        ];
+    }
+
+    return $result;
 }
 
 function generateInitialHouse(int $houseId): void
