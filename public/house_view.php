@@ -31,12 +31,12 @@ if (isset($_GET['floor'])) {
     }
 }
 
-$walls = $selectedFloorId ? get_walls_by_floor_id($selectedFloorId) : [];
+$floorLayout = $selectedFloorId ? build_floor_layout($selectedFloorId) : null;
 
 $smarty->assign('title', $house['name']);
 $smarty->assign('currentUser', $currentUser);
 $smarty->assign('house', $house);
 $smarty->assign('floors', $floors);
 $smarty->assign('selectedFloorId', $selectedFloorId);
-$smarty->assign('walls', $walls);
+$smarty->assign('floorLayout', $floorLayout);
 $smarty->display('house/view.tpl');
