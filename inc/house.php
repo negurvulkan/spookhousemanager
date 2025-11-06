@@ -143,6 +143,8 @@ function get_rooms_with_boundaries_by_floor_id(int $floorId): array
     $rooms = [];
     while ($row = $stmt->fetch()) {
         $boundary = [];
+        // TODO: boundary_path später aus walls rekonstruieren
+        // aktuelle Anzeige nutzt walls als Quelle für die Darstellung
         if (!empty($row['boundary_path'])) {
             $decoded = json_decode($row['boundary_path'], true);
             if (is_array($decoded)) {
@@ -364,6 +366,69 @@ function get_floor_with_house_by_id(int $floorId): ?array
     return $floor ?: null;
 }
 
+function get_room_with_house_by_id(int $roomId): ?array
+{
+    $db = getDb();
+    $sql = 'SELECT r.*, f.house_id, f.level, h.user_id, h.name AS house_name
+            FROM rooms r
+            INNER JOIN floors f ON r.floor_id = f.id
+            INNER JOIN houses h ON f.house_id = h.id
+            WHERE r.id = :room_id';
+    $stmt = $db->prepare($sql);
+    $stmt->execute(['room_id' => $roomId]);
+    $room = $stmt->fetch();
+
+    return $room ?: null;
+}
+
+function getWallsByRoomId(int $roomId): array
+{
+    $db = getDb();
+    $sql = "SELECT
+                w.id,
+                w.room_id,
+                w.start_x,
+                w.start_y,
+                w.end_x,
+                w.end_y,
+                w.status,
+                sa.sprite_path AS side_a_sprite,
+                sa.is_outside AS side_a_is_outside,
+                sa.material AS side_a_material,
+                sa.tint AS side_a_tint,
+                sb.sprite_path AS side_b_sprite,
+                sb.is_outside AS side_b_is_outside,
+                sb.material AS side_b_material,
+                sb.tint AS side_b_tint
+            FROM walls w
+            LEFT JOIN wall_side_types sa ON w.side_a_type = sa.id
+            LEFT JOIN wall_side_types sb ON w.side_b_type = sb.id
+            WHERE w.room_id = :room_id";
+    $stmt = $db->prepare($sql);
+    $stmt->execute(['room_id' => $roomId]);
+    $walls = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    return array_map(static function (array $wall): array {
+        return [
+            'id' => (int) $wall['id'],
+            'room_id' => (int) $wall['room_id'],
+            'start_x' => (int) $wall['start_x'],
+            'start_y' => (int) $wall['start_y'],
+            'end_x' => (int) $wall['end_x'],
+            'end_y' => (int) $wall['end_y'],
+            'status' => $wall['status'],
+            'side_a_sprite' => $wall['side_a_sprite'],
+            'side_a_is_outside' => isset($wall['side_a_is_outside']) ? (int) $wall['side_a_is_outside'] : null,
+            'side_a_material' => $wall['side_a_material'],
+            'side_a_tint' => $wall['side_a_tint'],
+            'side_b_sprite' => $wall['side_b_sprite'],
+            'side_b_is_outside' => isset($wall['side_b_is_outside']) ? (int) $wall['side_b_is_outside'] : null,
+            'side_b_material' => $wall['side_b_material'],
+            'side_b_tint' => $wall['side_b_tint'],
+        ];
+    }, $walls);
+}
+
 function get_walls_by_floor_id(int $floorId): array
 {
     $db = getDb();
@@ -390,39 +455,55 @@ function get_walls_by_floor_id(int $floorId): array
 function get_walls_with_sides_by_floor_id(int $floorId): array
 {
     $db = getDb();
-    $stmt = $db->prepare('SELECT w.id, w.room_id, w.start_x, w.start_y, w.end_x, w.end_y, w.status
+    $sql = "SELECT
+                w.id,
+                w.room_id,
+                w.start_x,
+                w.start_y,
+                w.end_x,
+                w.end_y,
+                w.status,
+                sa.sprite_path AS side_a_sprite,
+                sa.material AS side_a_material,
+                sa.is_outside AS side_a_is_outside,
+                sa.tint AS side_a_tint,
+                sb.sprite_path AS side_b_sprite,
+                sb.material AS side_b_material,
+                sb.is_outside AS side_b_is_outside,
+                sb.tint AS side_b_tint
             FROM walls w
             INNER JOIN rooms r ON w.room_id = r.id
-            WHERE r.floor_id = :floor_id');
+            LEFT JOIN wall_side_types sa ON w.side_a_type = sa.id
+            LEFT JOIN wall_side_types sb ON w.side_b_type = sb.id
+            WHERE r.floor_id = :floor_id";
+    $stmt = $db->prepare($sql);
     $stmt->execute(['floor_id' => $floorId]);
-    $walls = $stmt->fetchAll();
+    $walls = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (!$walls) {
         return [];
     }
 
-    $wallIds = array_column($walls, 'id');
-    $sideMap = [];
+    $normalizeSide = static function (array $wall, string $prefix): ?array {
+        $sprite = $wall[$prefix . '_sprite'] ?? null;
+        $material = $wall[$prefix . '_material'] ?? null;
+        $tint = $wall[$prefix . '_tint'] ?? null;
+        $isOutsideKey = $prefix . '_is_outside';
+        $isOutside = array_key_exists($isOutsideKey, $wall) && $wall[$isOutsideKey] !== null
+            ? (int) $wall[$isOutsideKey]
+            : null;
 
-    if (!empty($wallIds)) {
-        $placeholders = implode(',', array_fill(0, count($wallIds), '?'));
-        $sideStmt = $db->prepare("SELECT wall_id, side, sprite_path, material, is_outside, tint FROM wall_sides WHERE wall_id IN ({$placeholders})");
-        $sideStmt->execute($wallIds);
-
-        while ($row = $sideStmt->fetch()) {
-            $wallId = (int) $row['wall_id'];
-            $side = $row['side'];
-            if (!isset($sideMap[$wallId])) {
-                $sideMap[$wallId] = [];
-            }
-            $sideMap[$wallId][$side] = [
-                'sprite' => $row['sprite_path'],
-                'material' => $row['material'],
-                'is_outside' => isset($row['is_outside']) ? (int) $row['is_outside'] : 0,
-                'tint' => $row['tint'],
-            ];
+        if ($sprite === null && $material === null && $tint === null && $isOutside === null) {
+            return null;
         }
-    }
+
+        return [
+            'sprite' => $sprite,
+            'material' => $material,
+            'is_outside' => $isOutside,
+            'tint' => $tint,
+        ];
+    };
 
     $result = [];
     foreach ($walls as $wall) {
@@ -460,8 +541,8 @@ function get_walls_with_sides_by_floor_id(int $floorId): array
             'orientation' => $orientation,
             'status' => $wall['status'],
             'sides' => [
-                'A' => $sideMap[$wall['id']]['A'] ?? null,
-                'B' => $sideMap[$wall['id']]['B'] ?? null,
+                'A' => $normalizeSide($wall, 'side_a'),
+                'B' => $normalizeSide($wall, 'side_b'),
             ],
         ];
     }
@@ -510,6 +591,17 @@ function generateInitialHouse(int $houseId): void
         }
 
         $wallIds = [];
+        $typeStmt = $db->query("SELECT code, id FROM wall_side_types WHERE code IN ('outer_stone','inner_wood')");
+        $typeMap = [];
+        if ($typeStmt) {
+            while ($row = $typeStmt->fetch(PDO::FETCH_ASSOC)) {
+                $typeMap[$row['code']] = (int) $row['id'];
+            }
+        }
+
+        $defaultSideAType = $typeMap['outer_stone'] ?? null;
+        $defaultSideBType = $typeMap['inner_wood'] ?? null;
+
         $insertWallStmt = $db->prepare('INSERT INTO walls (room_id, start_x, start_y, end_x, end_y, side_a_type, side_b_type, status) VALUES (:room_id, :start_x, :start_y, :end_x, :end_y, :side_a_type, :side_b_type, :status)');
         foreach ($walls as $index => $wallData) {
             $insertWallStmt->execute([
@@ -518,8 +610,8 @@ function generateInitialHouse(int $houseId): void
                 'start_y' => $wallData['start_y'],
                 'end_x' => $wallData['end_x'],
                 'end_y' => $wallData['end_y'],
-                'side_a_type' => 'default',
-                'side_b_type' => 'default',
+                'side_a_type' => $defaultSideAType,
+                'side_b_type' => $defaultSideBType,
                 'status' => 'normal',
             ]);
             $wallIds[$index] = (int) $db->lastInsertId();
