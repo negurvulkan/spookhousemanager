@@ -34,6 +34,11 @@ return static function (PDO $db): void {
         return (bool) $stmt->fetchColumn();
     };
 
+    if ($tableExists('wall_side_types')) {
+        // Legacy wall_sides update is skipped once wall_side_types library is available.
+        return;
+    }
+
     if (!$tableExists('wall_sides')) {
         $db->exec('CREATE TABLE wall_sides (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
