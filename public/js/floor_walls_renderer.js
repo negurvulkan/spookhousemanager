@@ -46,6 +46,60 @@
         SPRITE_CACHE.set(spritePath, image);
     }
 
+    function hexToRgba(hex, alpha) {
+        if (typeof hex !== 'string') {
+            return null;
+        }
+
+        const trimmed = hex.trim();
+        if (trimmed === '') {
+            return null;
+        }
+
+        const normalized = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+        if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+            return null;
+        }
+
+        const r = parseInt(normalized.slice(0, 2), 16);
+        const g = parseInt(normalized.slice(2, 4), 16);
+        const b = parseInt(normalized.slice(4, 6), 16);
+
+        const resolvedAlpha = Number.isFinite(alpha) ? alpha : 1;
+
+        return `rgba(${r}, ${g}, ${b}, ${resolvedAlpha})`;
+    }
+
+    function resolveFallbackColor(side, defaultColor, alpha = 0.75) {
+        if (!side) {
+            return defaultColor;
+        }
+
+        let tintColor = null;
+        if (typeof side.tint !== 'undefined' && side.tint !== null) {
+            if (typeof side.tint === 'number' && Number.isFinite(side.tint)) {
+                const hex = side.tint.toString(16).padStart(6, '0');
+                tintColor = hexToRgba(`#${hex}`, alpha);
+            } else {
+                tintColor = hexToRgba(String(side.tint), alpha);
+            }
+        }
+        if (tintColor) {
+            return tintColor;
+        }
+
+        return defaultColor;
+    }
+
+    function drawFilledRect(ctx, x, y, width, height, color) {
+        if (!ctx || !color) {
+            return;
+        }
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, width, height);
+    }
+
     function normalizeNumber(value, fallback = 0) {
         if (typeof value === 'number' && Number.isFinite(value)) {
             return value;
@@ -162,6 +216,10 @@
             return;
         }
 
+        const SIDE_A_DEFAULT_COLOR = 'rgba(148, 163, 184, 0.7)';
+        const SIDE_B_DEFAULT_COLOR = 'rgba(203, 213, 225, 0.65)';
+        const WALL_CORE_COLOR = 'rgba(30, 41, 59, 0.75)';
+
         data.walls.forEach((rawWall) => {
             const wall = normalizeWallData(rawWall);
             if (!wall) {
@@ -177,33 +235,63 @@
 
             if (orientation === 'horizontal') {
                 const width = Math.max(cellSize, Math.abs(endPixelX - startPixelX));
+                const baseX = Math.min(startPixelX, endPixelX);
                 const topY = startPixelY - wallThickness;
                 const bottomY = startPixelY;
+                const halfThickness = wallThickness / 2;
+                const coreY = startPixelY - halfThickness;
 
                 const sideAPath = resolveSpritePath(sides.A);
                 const sideBPath = resolveSpritePath(sides.B);
 
+                drawFilledRect(ctx, baseX, coreY, width, wallThickness, WALL_CORE_COLOR);
+
+                if (!sideAPath) {
+                    const fallbackColor = resolveFallbackColor(sides.A, SIDE_A_DEFAULT_COLOR, 0.85);
+                    drawFilledRect(ctx, baseX, topY, width, wallThickness, fallbackColor);
+                }
+
+                if (!sideBPath) {
+                    const fallbackColor = resolveFallbackColor(sides.B, SIDE_B_DEFAULT_COLOR, 0.8);
+                    drawFilledRect(ctx, baseX, bottomY, width, wallThickness, fallbackColor);
+                }
+
                 if (sideAPath) {
-                    drawWallSprite(ctx, sideAPath, Math.min(startPixelX, endPixelX), topY, width, wallThickness);
+                    drawWallSprite(ctx, sideAPath, baseX, topY, width, wallThickness);
                 }
 
                 if (sideBPath) {
-                    drawWallSprite(ctx, sideBPath, Math.min(startPixelX, endPixelX), bottomY, width, wallThickness);
+                    drawWallSprite(ctx, sideBPath, baseX, bottomY, width, wallThickness);
                 }
             } else if (orientation === 'vertical') {
                 const height = Math.max(cellSize, Math.abs(endPixelY - startPixelY));
+                const baseY = Math.min(startPixelY, endPixelY);
                 const leftX = startPixelX - wallThickness;
                 const rightX = startPixelX;
+                const halfThickness = wallThickness / 2;
+                const coreX = startPixelX - halfThickness;
 
                 const sideAPath = resolveSpritePath(sides.A);
                 const sideBPath = resolveSpritePath(sides.B);
 
+                drawFilledRect(ctx, coreX, baseY, wallThickness, height, WALL_CORE_COLOR);
+
+                if (!sideAPath) {
+                    const fallbackColor = resolveFallbackColor(sides.A, SIDE_A_DEFAULT_COLOR, 0.85);
+                    drawFilledRect(ctx, leftX, baseY, wallThickness, height, fallbackColor);
+                }
+
+                if (!sideBPath) {
+                    const fallbackColor = resolveFallbackColor(sides.B, SIDE_B_DEFAULT_COLOR, 0.8);
+                    drawFilledRect(ctx, rightX, baseY, wallThickness, height, fallbackColor);
+                }
+
                 if (sideAPath) {
-                    drawWallSprite(ctx, sideAPath, leftX, Math.min(startPixelY, endPixelY), wallThickness, height);
+                    drawWallSprite(ctx, sideAPath, leftX, baseY, wallThickness, height);
                 }
 
                 if (sideBPath) {
-                    drawWallSprite(ctx, sideBPath, rightX, Math.min(startPixelY, endPixelY), wallThickness, height);
+                    drawWallSprite(ctx, sideBPath, rightX, baseY, wallThickness, height);
                 }
             }
         });
