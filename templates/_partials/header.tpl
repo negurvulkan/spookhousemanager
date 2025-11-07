@@ -15,14 +15,33 @@
             letter-spacing: 0.05em;
         }
         .house-grid-wrapper {
+            position: relative;
             background-color: #1d1d2f;
             border: 1px solid #343a40;
             border-radius: 0.5rem;
             padding: 1.25rem;
         }
-        .house-grid-svg {
+        .house-grid-canvas {
             width: 100%;
             height: auto;
+            display: block;
+            border-radius: 0.35rem;
+            background-color: #060611;
+        }
+        .house-grid-overlay {
+            position: absolute;
+            top: 1.25rem;
+            left: 1.25rem;
+            right: 1.25rem;
+            bottom: 1.25rem;
+            pointer-events: none;
+            border-radius: 0.35rem;
+            overflow: hidden;
+            z-index: 2;
+        }
+        .house-grid-svg {
+            width: 100%;
+            height: 100%;
             display: block;
         }
         .grid-walkable {

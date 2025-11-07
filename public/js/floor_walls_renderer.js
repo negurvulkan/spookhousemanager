@@ -316,12 +316,14 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        const canvas = document.getElementById('houseCanvas');
-        if (!canvas) {
+        const canvases = document.querySelectorAll('canvas[data-wall-renderer]');
+        if (!canvases.length) {
             return;
         }
 
-        fetchAndRenderWalls(canvas);
+        canvases.forEach((canvas) => {
+            fetchAndRenderWalls(canvas);
+        });
     });
 
     function renderWallsWithDefaults(ctx, data, cellSize = DEFAULT_CELL_SIZE, wallThickness, offset) {
